@@ -1,0 +1,748 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>のこり時間</title>
+<meta name="description" content="人生・今年・今月・今日と、自分で決めた時刻や日時までの残り時間を表示します。">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="のこり時間">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<style>
+/* Layout: one narrow column like a phone face. Header → four fixed meters → user timers → three big life figures. Dark-first and monochrome; the bars carry the meaning. */
+:root{
+  --bg:#000000;
+  --surface:#161618;
+  --surface-2:#222225;
+  --fg:#ededea;
+  --muted:#8e8e94;
+  --track:#2c2c30;
+  --fill:#e9e9e5;
+  --line:#2c2c30;
+  --danger:#ff8070;
+  --focus:#9ec5ff;
+  --scrim:rgba(0,0,0,.6);
+  --font-num:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Segoe UI",Roboto,Arial,sans-serif;
+  --font-ja:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic UI",Meiryo,sans-serif;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:border-box}
+html{background:var(--bg);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);-webkit-tap-highlight-color:transparent}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-ja);-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;line-height:1.4}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+.app{max-width:540px;margin:0 auto;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px));padding-block:12px 56px;display:flex;flex-direction:column;gap:30px}
+
+/* header */
+.top{display:grid;grid-template-columns:48px minmax(0,1fr) 48px;align-items:center;gap:8px}
+.top-mid{text-align:center;min-width:0}
+.top h1{margin:0;font-size:19px;font-weight:700;letter-spacing:.08em}
+.clock{display:block;margin-top:3px;font-family:var(--font-num);font-size:13px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.icon-btn{width:48px;height:48px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--fg);display:grid;place-items:center;cursor:pointer;padding:0;transition:transform .12s ease}
+.icon-btn svg{width:23px;height:23px}
+.icon-btn:active{transform:scale(.94)}
+.icon-btn.sm{width:40px;height:40px}
+.icon-btn.sm svg{width:20px;height:20px}
+
+/* sample notice */
+.notice{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.notice p{margin:0;flex:1 1 220px;min-width:0;font-size:13.5px;line-height:1.6}
+.chip{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.1em;padding:3px 8px;border-radius:999px;background:var(--fill);color:var(--bg);margin-right:6px;vertical-align:1px}
+
+/* meters */
+.meters{display:flex;flex-direction:column;gap:28px}
+.meter{display:grid;grid-template-columns:32px minmax(0,1fr);column-gap:14px;align-items:center}
+.meter-icon{width:32px;height:32px;color:var(--fg)}
+.meter-icon svg{width:100%;height:100%;display:block}
+.meter-body{min-width:0}
+.meter-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px}
+.meter-title{display:flex;align-items:baseline;flex-wrap:wrap;column-gap:.3em;min-width:0}
+.m-label{font-size:clamp(19px,5.6vw,27px);font-weight:600;letter-spacing:.02em;overflow-wrap:anywhere}
+.m-sep{color:var(--muted);font-size:clamp(17px,5vw,22px);font-weight:700;margin-inline:.05em .1em}
+.m-ato{font-size:clamp(14px,4vw,17px);color:var(--muted)}
+.m-val{font-family:var(--font-num);font-size:clamp(22px,6.7vw,32px);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap}
+.m-val .u{font-family:var(--font-ja);font-size:.84em;margin-left:.05em}
+.m-val .ul{margin-left:.03em;font-weight:500}
+.m-pct{font-family:var(--font-num);color:var(--muted);font-size:clamp(13px,3.9vw,18px);font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.bar{height:10px;border-radius:999px;background:var(--track);overflow:hidden}
+.bar-fill{height:100%;width:0;background:var(--fill);border-radius:inherit;transition:width .6s ease}
+.m-cap{margin-top:8px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.meter.custom .m-label{font-size:clamp(18px,5.2vw,22px)}
+.meter.done .m-val{font-family:var(--font-ja);font-size:clamp(16px,4.6vw,19px);font-weight:600;color:var(--muted);white-space:normal}
+.meter.done .bar-fill{opacity:.4}
+.meter.masked .m-val{letter-spacing:.05em}
+
+.sec{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.14em;margin-top:4px}
+.sec::after{content:"";flex:1;height:1px;background:var(--line)}
+.add-link{align-self:flex-start;background:none;border:1px dashed var(--line);color:var(--muted);border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
+.add-link:hover{color:var(--fg);border-color:var(--muted)}
+
+/* life figures */
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));text-align:center;margin-top:14px;padding-top:30px;border-top:1px solid var(--line)}
+.stat-l{font-size:15px;font-weight:700;letter-spacing:.06em}
+.stat-v{font-family:var(--font-num);font-weight:800;font-size:clamp(54px,18vw,100px);line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.03em;margin-top:10px}
+
+/* settings sheet */
+.scrim{position:fixed;inset:0;z-index:50;background:var(--scrim);display:flex;align-items:flex-end;justify-content:center;padding-top:max(24px,env(safe-area-inset-top,0px))}
+.sheet{width:100%;max-width:560px;max-height:100%;overflow-y:auto;overscroll-behavior:contain;background:var(--surface);color:var(--fg);border:1px solid var(--line);border-bottom:0;border-radius:22px 22px 0 0;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px));padding-block:0 env(safe-area-inset-bottom,0px)}
+@media (min-width:640px){
+  .scrim{align-items:center;padding:24px}
+  .sheet{border-radius:22px;border-bottom:1px solid var(--line);max-height:calc(100% - 16px)}
+}
+.sheet-head{position:sticky;top:0;z-index:2;background:var(--surface);display:flex;align-items:center;justify-content:space-between;padding-block:14px 10px}
+.sheet-head h2{margin:0;font-size:19px;font-weight:700;letter-spacing:.06em}
+.group{display:flex;flex-direction:column;gap:14px;padding-block:14px 22px;border-bottom:1px solid var(--line)}
+.group h3{margin:0;font-size:13px;font-weight:700;letter-spacing:.14em;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>label,.lbl{font-size:13px;font-weight:600;color:var(--fg)}
+.hint{margin:0;font-size:12.5px;color:var(--muted);line-height:1.6}
+.err{margin:0;font-size:12.5px;color:var(--danger);line-height:1.5}
+.err:empty{display:none}
+.in{font:inherit;font-size:16px;color:var(--fg);background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;width:100%;min-width:0;min-height:46px;-webkit-appearance:none;appearance:none}
+.in::-webkit-date-and-time-value{text-align:left}
+.in[aria-invalid="true"]{border-color:var(--danger)}
+.stepper{display:flex;align-items:center;gap:8px}
+.stepper .in{width:90px;text-align:center;font-family:var(--font-num);font-size:20px;font-weight:600}
+.suffix{font-size:15px;color:var(--muted)}
+.presets{display:flex;flex-wrap:wrap;gap:8px}
+.pre{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+.pre[aria-pressed="true"]{background:var(--fill);color:var(--bg);border-color:transparent}
+
+.btn{font-size:16px;font-weight:600;border-radius:12px;padding:10px 16px;min-height:46px;cursor:pointer;border:1px solid var(--line);background:var(--surface-2);color:var(--fg)}
+.btn.primary{background:var(--fill);color:var(--bg);border-color:transparent}
+.btn.ghost{background:transparent}
+.btn.step{width:46px;padding:0;font-size:22px;font-weight:500}
+.btn.del{color:var(--danger);background:transparent;border-color:transparent;font-size:14px;padding:8px 10px;min-height:40px}
+.btn.sm{min-height:38px;padding:7px 14px;font-size:14px}
+
+.tlist{display:flex;flex-direction:column;gap:12px}
+.tlist:empty{display:none}
+.tcard{display:flex;flex-direction:column;gap:12px;background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:12px}
+.trow{display:flex;gap:8px;align-items:center}
+.trow .in{flex:1}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:3px;background:var(--surface-2);border-radius:11px}
+.seg label{position:relative;text-align:center;padding:8px 6px;border-radius:8px;font-size:14px;font-weight:600;color:var(--muted);cursor:pointer}
+.seg input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
+.seg label.on{background:var(--fill);color:var(--bg)}
+.seg label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:1px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.two.stack{grid-template-columns:1fr}
+.add{align-self:flex-start}
+.sync{margin:0;padding-block:16px 4px;font-size:12.5px;color:var(--muted);line-height:1.6}
+.sheet-foot{position:sticky;bottom:0;background:var(--surface);display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:10px;padding-block:12px 16px;border-top:1px solid var(--line);margin-top:8px}
+.sheet-foot .err{flex:1 1 100%}
+
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,12px);opacity:0;z-index:60;background:var(--fill);color:var(--bg);font-size:14px;font-weight:600;padding:10px 18px;border-radius:999px;transition:opacity .2s ease,transform .2s ease;pointer-events:none}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (prefers-reduced-motion: reduce){
+  .bar-fill,.toast,.icon-btn{transition:none}
+}
+</style>
+</head>
+<body>
+
+<main class="app" id="app">
+  <header class="top">
+    <button type="button" class="icon-btn" id="settings-btn" aria-label="設定を開く">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.5"/><circle cx="10" cy="17" r="2.5"/></svg>
+    </button>
+    <div class="top-mid">
+      <h1>のこり時間</h1>
+      <span class="clock" id="clock">&nbsp;</span>
+    </div>
+    <button type="button" class="icon-btn" id="hide-btn" aria-pressed="false" aria-label="人生の数字を隠す">
+      <svg id="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+      <svg id="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" hidden><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/><path d="M4 4l16 16"/></svg>
+    </button>
+  </header>
+
+  <div class="notice" id="notice" hidden>
+    <p><span class="chip">サンプル</span>いまは例の生年月日（1989年4月1日・81歳まで）で表示しています。生年月日と想定寿命を入れると、あなたの残り時間になります。</p>
+    <button type="button" class="btn primary sm" id="notice-btn">設定する</button>
+  </div>
+
+  <section class="meters" id="meters" aria-label="残り時間"></section>
+
+  <section class="stats" aria-label="年齢と寿命">
+    <div><div class="stat-l">年齢</div><div class="stat-v" id="s-age">–</div></div>
+    <div><div class="stat-l">残り年数</div><div class="stat-v" id="s-left">–</div></div>
+    <div><div class="stat-l">想定寿命</div><div class="stat-v" id="s-life">–</div></div>
+  </section>
+</main>
+
+<div class="scrim" id="scrim" hidden>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <form id="form" novalidate>
+      <div class="sheet-head">
+        <h2 id="sheet-title">設定</h2>
+        <button type="button" class="icon-btn sm" id="close-btn" aria-label="保存せずに閉じる">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </div>
+
+      <section class="group">
+        <h3>人生</h3>
+        <div class="field">
+          <label for="f-birthday">生年月日</label>
+          <input class="in" type="date" id="f-birthday" min="1900-01-01">
+          <p class="err" id="e-birthday"></p>
+        </div>
+        <div class="field">
+          <label for="f-lifespan">何歳まで生きる想定か</label>
+          <div class="stepper">
+            <button type="button" class="btn step" id="life-dec" aria-label="1歳減らす">−</button>
+            <input class="in" type="number" id="f-lifespan" inputmode="numeric" min="1" max="150" step="1">
+            <button type="button" class="btn step" id="life-inc" aria-label="1歳増やす">＋</button>
+            <span class="suffix">歳</span>
+          </div>
+          <div class="presets" id="presets">
+            <button type="button" class="pre" data-v="81">81歳（男性の平均寿命）</button>
+            <button type="button" class="pre" data-v="87">87歳（女性の平均寿命）</button>
+            <button type="button" class="pre" data-v="90">90歳</button>
+            <button type="button" class="pre" data-v="100">100歳</button>
+          </div>
+          <p class="err" id="e-lifespan"></p>
+        </div>
+      </section>
+
+      <section class="group">
+        <h3>設定した時間まで</h3>
+        <p class="hint">「今日」の下に表示されます。毎日の時刻（例：定時 18:00）と、特定の日時（例：締切 12/25 17:00）を登録できます。</p>
+        <div class="tlist" id="timer-list"></div>
+        <button type="button" class="btn add" id="add-timer">＋ タイマーを追加</button>
+      </section>
+
+      <p class="sync" id="sync-note"></p>
+
+      <div class="sheet-foot">
+        <p class="err" id="e-form"></p>
+        <button type="button" class="btn ghost" id="cancel-btn">キャンセル</button>
+        <button type="submit" class="btn primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script>
+(() => {
+'use strict';
+
+const DAY = 86400000, HOUR = 3600000, MIN = 60000;
+const LS_SETTINGS = 'nokori-jikan.settings.v1';
+const LS_HIDE = 'nokori-jikan.hide.v1';
+const WD = ['日','月','火','水','木','金','土'];
+const MAX_TIMERS = 12;
+
+const $ = (s, r = document) => r.querySelector(s);
+const pad = n => String(n).padStart(2, '0');
+const clamp01 = x => Math.min(1, Math.max(0, x));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+
+/* ---------- date helpers ---------- */
+function parseDate(s){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return d.getMonth() === +m[2] - 1 ? d : null;
+}
+function parseHM(s){
+  const m = /^(\d{2}):(\d{2})/.exec(s || '');
+  if (!m) return null;
+  const h = +m[1], mi = +m[2];
+  return h < 24 && mi < 60 ? [h, mi] : null;
+}
+function parseDT(s){
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s || '');
+  if (!m) return null;
+  const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  return isNaN(d) ? null : d;
+}
+const hmStr = a => pad(a[0]) + ':' + pad(a[1]);
+const dtLocal = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const dateLocal = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+function fmtDT(d, now){
+  const y = d.getFullYear() !== now.getFullYear() ? d.getFullYear() + '年' : '';
+  return `${y}${d.getMonth()+1}月${d.getDate()}日(${WD[d.getDay()]}) ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function newId(){ return 't' + Math.random().toString(36).slice(2, 9); }
+
+/* ---------- settings model ---------- */
+function normalize(raw){
+  if (!raw || typeof raw !== 'object') return null;
+  if (!parseDate(raw.birthday)) return null;
+  const lifespan = Math.round(Number(raw.lifespan));
+  if (!(lifespan >= 1 && lifespan <= 150)) return null;
+  const timers = [];
+  if (Array.isArray(raw.timers)) {
+    for (const t of raw.timers.slice(0, MAX_TIMERS)) {
+      if (!t || typeof t !== 'object') continue;
+      const id = typeof t.id === 'string' && /^[\w-]{1,40}$/.test(t.id) ? t.id : newId();
+      const name = String(t.name || '').trim().slice(0, 40) || 'タイマー';
+      if (t.type === 'daily') {
+        const e = parseHM(t.end); if (!e) continue;
+        let s = parseHM(t.start) || [0, 0];
+        if (s[0] * 60 + s[1] >= e[0] * 60 + e[1]) s = [0, 0];
+        timers.push({ id, name, type: 'daily', start: hmStr(s), end: hmStr(e) });
+      } else if (t.type === 'date') {
+        const e = parseDT(t.end); if (!e) continue;
+        const s = parseDT(t.start);
+        timers.push({ id, name, type: 'date', start: s && s < e ? dtLocal(s) : '', end: dtLocal(e) });
+      }
+    }
+  }
+  return { birthday: raw.birthday, lifespan, timers };
+}
+
+function makeSample(now){
+  let end = new Date(now.getFullYear(), 11, 28, 18, 0);
+  if (end <= now) end = new Date(now.getFullYear() + 1, 11, 28, 18, 0);
+  const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0);
+  return {
+    birthday: '1989-04-01', lifespan: 81,
+    timers: [
+      { id: 'sample-1', name: '定時', type: 'daily', start: '09:00', end: '18:00' },
+      { id: 'sample-2', name: '仕事納め', type: 'date', start: dtLocal(start), end: dtLocal(end) }
+    ]
+  };
+}
+
+/* ---------- calculations ---------- */
+function lifeInfo(s, now){
+  const b = parseDate(s.birthday);
+  const death = new Date(b.getFullYear() + s.lifespan, b.getMonth(), b.getDate());
+  let age = now.getFullYear() - b.getFullYear();
+  if (now < new Date(now.getFullYear(), b.getMonth(), b.getDate())) age--;
+  age = Math.max(0, age);
+  const remain = death - now;
+  return {
+    age, lifespan: s.lifespan,
+    yearsLeft: Math.max(0, s.lifespan - age),
+    days: Math.max(0, Math.ceil(remain / DAY)),
+    pct: clamp01((now - b) / (death - b)),
+    over: remain <= 0
+  };
+}
+function timerInfo(t, now){
+  if (t.type === 'daily') {
+    const [sh, sm] = parseHM(t.start), [eh, em] = parseHM(t.end);
+    const y = now.getFullYear(), mo = now.getMonth(), d = now.getDate();
+    const s = new Date(y, mo, d, sh, sm), e = new Date(y, mo, d, eh, em);
+    const cap = `毎日 ${t.start}〜${t.end}`;
+    if (now >= e) return { done: '今日はおわり', pct: 1, cap: cap + '・0時にリセット' };
+    const before = now < s;
+    return { ms: e - now, pct: before ? 0 : clamp01((now - s) / (e - s)), cap: before ? `${cap}・開始まで ${fmtHMText(s - now)}` : cap };
+  }
+  const e = parseDT(t.end), s = parseDT(t.start);
+  const cap = fmtDT(e, now) + ' まで';
+  if (now >= e) return { done: '終了しました', pct: 1, cap };
+  return { ms: e - now, long: true, pct: s ? clamp01((now - s) / (e - s)) : null, cap };
+}
+
+/* ---------- value formatting ---------- */
+const num = n => n.toLocaleString('ja-JP');
+const vDays = d => `${num(d)}<span class="u">日</span>`;
+function vHM(ms){
+  const t = Math.max(0, Math.floor(ms / MIN));
+  return `${Math.floor(t / 60)}<span class="ul">h</span> ${t % 60}<span class="ul">m</span>`;
+}
+function fmtHMText(ms){
+  const t = Math.max(0, Math.floor(ms / MIN));
+  return `${Math.floor(t / 60)}h ${t % 60}m`;
+}
+const vLong = ms => ms >= DAY
+  ? `${num(Math.floor(ms / DAY))}<span class="u">日</span> ${Math.floor((ms % DAY) / HOUR)}<span class="ul">h</span>`
+  : vHM(ms);
+const pctInt = p => Math.floor(p * 100) + '%';
+const pct1 = p => (Math.floor(p * 1000) / 10).toFixed(1) + '%';
+
+/* ---------- icons ---------- */
+const SVG = (inner) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const dots = (pts) => pts.map(([x, y]) => `<circle cx="${x}" cy="${y}" r="1" fill="currentColor" stroke="none"/>`).join('');
+const ICONS = {
+  life: SVG('<path d="M6 3h12M6 21h12"/><path d="M7.5 3v2.4a5 5 0 0 0 2.2 4.1L12 11l2.3-1.5a5 5 0 0 0 2.2-4.1V3"/><path d="M7.5 21v-2.4a5 5 0 0 1 2.2-4.1L12 13l2.3 1.5a5 5 0 0 1 2.2 4.1V21"/><path d="M9.3 19.6 12 17.8l2.7 1.8z" fill="currentColor"/>'),
+  year: SVG('<rect x="2.5" y="4.5" width="16" height="15" rx="2.5"/><path d="M2.5 9h16M6.5 2.5v3.5M14.5 2.5v3.5"/>' + dots([[6,12.5],[9,12.5],[12,12.5],[15,12.5],[6,16],[9,16]]) + '<circle cx="17.8" cy="17.6" r="4.6" fill="var(--bg)"/><path d="M17.8 15.4v2.3l1.5 1"/>'),
+  month: SVG('<rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9.5h18M7.5 2.5v3.5M16.5 2.5v3.5"/>' + dots([[7.5,13],[10.5,13],[13.5,13],[16.5,13],[7.5,16.8],[10.5,16.8],[13.5,16.8],[16.5,16.8]])),
+  day: SVG('<circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.6 2.2"/>'),
+  daily: SVG('<circle cx="12" cy="13" r="7.5"/><path d="M12 9.3V13l2.4 1.6M4.5 5.6 7.2 3.4M19.5 5.6l-2.7-2.2"/>'),
+  date: SVG('<path d="M5.5 21V3.8"/><path d="M5.5 4h12l-2.4 4.3 2.4 4.2h-12"/>')
+};
+
+/* ---------- state ---------- */
+const state = { settings: null, isSample: true, hide: lsGet(LS_HIDE) === '1' };
+
+(function loadLocal(){
+  let s = null;
+  try { s = normalize(JSON.parse(lsGet(LS_SETTINGS) || 'null')); } catch (e) { s = null; }
+  if (s) { state.settings = s; state.isSample = false; }
+  else { state.settings = makeSample(new Date()); state.isSample = true; }
+})();
+
+/* ---------- meters DOM ---------- */
+const metersEl = $('#meters');
+let rows = {};
+function meterEl(label, icon, custom){
+  const row = document.createElement('div');
+  row.className = 'meter' + (custom ? ' custom' : '');
+  row.innerHTML =
+    `<div class="meter-icon" aria-hidden="true">${ICONS[icon]}</div>
+     <div class="meter-body">
+       <div class="meter-head">
+         <div class="meter-title"><span class="m-label"></span><span class="m-sep" aria-hidden="true">：</span><span class="m-ato">あと</span><span class="m-val"></span></div>
+         <span class="m-pct"></span>
+       </div>
+       <div class="bar" aria-hidden="true"><div class="bar-fill"></div></div>
+       ${custom ? '<div class="m-cap"></div>' : ''}
+     </div>`;
+  row.querySelector('.m-label').textContent = label;
+  return {
+    row, ato: row.querySelector('.m-ato'), val: row.querySelector('.m-val'),
+    pct: row.querySelector('.m-pct'), fill: row.querySelector('.bar-fill'),
+    cap: row.querySelector('.m-cap'), c: {}
+  };
+}
+function setMeter(m, o){
+  const done = !!o.done;
+  m.row.classList.toggle('done', done);
+  m.row.classList.toggle('masked', !!o.masked);
+  m.ato.hidden = done;
+  const html = done ? esc(o.done) : o.html;
+  if (m.c.html !== html) { m.val.innerHTML = html; m.c.html = html; }
+  const pt = o.pctText == null ? '' : o.pctText;
+  if (m.c.pt !== pt) { m.pct.textContent = pt; m.c.pt = pt; }
+  const w = o.pct == null ? '0%' : (o.pct * 100).toFixed(2) + '%';
+  if (m.c.w !== w) { m.fill.style.width = w; m.c.w = w; }
+  if (m.cap && o.cap != null && m.c.cap !== o.cap) { m.cap.textContent = o.cap; m.c.cap = o.cap; }
+}
+function buildMeters(){
+  metersEl.textContent = '';
+  rows = { life: meterEl('人生', 'life'), year: meterEl('今年', 'year'), month: meterEl('今月', 'month'), day: meterEl('今日', 'day'), timers: [] };
+  [rows.life, rows.year, rows.month, rows.day].forEach(m => metersEl.appendChild(m.row));
+  const sec = document.createElement('div');
+  sec.className = 'sec';
+  sec.textContent = '設定した時間まで';
+  metersEl.appendChild(sec);
+  for (const t of state.settings.timers) {
+    const m = meterEl(t.name, t.type === 'daily' ? 'daily' : 'date', true);
+    m.t = t;
+    rows.timers.push(m);
+    metersEl.appendChild(m.row);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'add-link';
+  add.textContent = state.settings.timers.length ? '＋ タイマーを追加・編集' : '＋ 時刻や日時までのタイマーを追加';
+  add.addEventListener('click', () => openSettings({ addTimer: !state.settings.timers.length }));
+  metersEl.appendChild(add);
+  $('#notice').hidden = !state.isSample;
+}
+
+/* ---------- tick ---------- */
+const clockEl = $('#clock');
+function tick(){
+  const now = new Date();
+  clockEl.textContent = `${now.getMonth()+1}月${now.getDate()}日(${WD[now.getDay()]}) ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const s = state.settings;
+
+  const L = lifeInfo(s, now);
+  if (state.hide) setMeter(rows.life, { html: '?<span class="u">日</span>', pctText: '?%', pct: L.pct, masked: true });
+  else if (L.over) setMeter(rows.life, { done: '想定寿命を過ぎました', pctText: '100%', pct: 1 });
+  else setMeter(rows.life, { html: vDays(L.days), pctText: pct1(L.pct), pct: L.pct });
+
+  const y0 = new Date(now.getFullYear(), 0, 1), y1 = new Date(now.getFullYear() + 1, 0, 1);
+  const py = (now - y0) / (y1 - y0);
+  setMeter(rows.year, { html: vDays(Math.ceil((y1 - now) / DAY)), pctText: pctInt(py), pct: py });
+
+  const m0 = new Date(now.getFullYear(), now.getMonth(), 1), m1 = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const pm = (now - m0) / (m1 - m0);
+  setMeter(rows.month, { html: vDays(Math.ceil((m1 - now) / DAY)), pctText: pctInt(pm), pct: pm });
+
+  const d0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()), d1 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const pd = (now - d0) / (d1 - d0);
+  setMeter(rows.day, { html: vHM(d1 - now), pctText: pctInt(pd), pct: pd });
+
+  for (const m of rows.timers) {
+    const i = timerInfo(m.t, now);
+    if (i.done) setMeter(m, { done: i.done, pctText: '100%', pct: 1, cap: i.cap });
+    else setMeter(m, { html: i.long ? vLong(i.ms) : vHM(i.ms), pctText: i.pct == null ? '' : pctInt(i.pct), pct: i.pct, cap: i.cap });
+  }
+
+  const q = v => state.hide ? '?' : String(v);
+  setText('#s-age', q(L.age));
+  setText('#s-left', q(L.yearsLeft));
+  setText('#s-life', q(L.lifespan));
+}
+function setText(sel, v){ const el = $(sel); if (el.textContent !== v) el.textContent = v; }
+
+/* ---------- hide toggle ---------- */
+const hideBtn = $('#hide-btn');
+function renderHide(){
+  hideBtn.setAttribute('aria-pressed', String(state.hide));
+  hideBtn.setAttribute('aria-label', state.hide ? '人生の数字を表示する' : '人生の数字を隠す');
+  $('#eye-on').toggleAttribute('hidden', state.hide);
+  $('#eye-off').toggleAttribute('hidden', !state.hide);
+}
+hideBtn.addEventListener('click', () => {
+  state.hide = !state.hide;
+  lsSet(LS_HIDE, state.hide ? '1' : '0');
+  renderHide();
+  tick();
+});
+
+/* ---------- toast ---------- */
+let toastTimer;
+function toast(msg){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.hidden = false;
+  requestAnimationFrame(() => t.classList.add('show'));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.classList.remove('show'); setTimeout(() => { t.hidden = true; }, 250); }, 1800);
+}
+
+/* ---------- settings sheet ---------- */
+const scrim = $('#scrim');
+const form = $('#form');
+const fBirthday = $('#f-birthday');
+const fLifespan = $('#f-lifespan');
+const timerList = $('#timer-list');
+let draft = null;
+let lastFocus = null;
+
+function toDraftTimer(t, now){
+  return {
+    id: t.id, name: t.name, type: t.type,
+    dStart: t.type === 'daily' ? t.start : '09:00',
+    dEnd: t.type === 'daily' ? t.end : '18:00',
+    xStart: t.type === 'date' && t.start ? t.start : dtLocal(now),
+    xEnd: t.type === 'date' ? t.end : ''
+  };
+}
+function blankTimer(){
+  const now = new Date(); now.setSeconds(0, 0);
+  return { id: newId(), name: '', type: 'daily', dStart: '09:00', dEnd: '18:00', xStart: dtLocal(now), xEnd: '' };
+}
+
+function openSettings(opts = {}){
+  const now = new Date();
+  const s = state.settings;
+  draft = {
+    timers: state.isSample
+      ? [toDraftTimer(s.timers[0], now)]
+      : s.timers.map(t => toDraftTimer(t, now))
+  };
+  if (opts.addTimer && draft.timers.length < MAX_TIMERS) draft.timers.push(blankTimer());
+  fBirthday.value = state.isSample ? '' : s.birthday;
+  fBirthday.max = dateLocal(now);
+  fLifespan.value = String(s.lifespan);
+  clearErrors();
+  renderPresets();
+  renderTimerList();
+  renderSync();
+  lastFocus = document.activeElement;
+  scrim.hidden = false;
+  document.documentElement.style.overflow = 'hidden';
+  const target = opts.addTimer ? timerList.lastElementChild && timerList.lastElementChild.querySelector('.t-name') : fBirthday;
+  setTimeout(() => {
+    if (target) { target.focus({ preventScroll: true }); target.scrollIntoView({ block: 'center' }); }
+  }, 30);
+}
+function closeSettings(){
+  scrim.hidden = true;
+  document.documentElement.style.overflow = '';
+  draft = null;
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
+
+function renderPresets(){
+  const v = String(Math.round(Number(fLifespan.value)));
+  document.querySelectorAll('#presets .pre').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+}
+function stepLife(d){
+  let v = Math.round(Number(fLifespan.value));
+  if (!Number.isFinite(v)) v = 81;
+  fLifespan.value = String(Math.min(150, Math.max(1, v + d)));
+  renderPresets();
+}
+$('#life-dec').addEventListener('click', () => stepLife(-1));
+$('#life-inc').addEventListener('click', () => stepLife(1));
+fLifespan.addEventListener('input', renderPresets);
+$('#presets').addEventListener('click', e => {
+  const b = e.target.closest('.pre'); if (!b) return;
+  fLifespan.value = b.dataset.v;
+  renderPresets();
+});
+
+function renderTimerList(){
+  timerList.textContent = '';
+  draft.timers.forEach(t => timerList.appendChild(timerCard(t)));
+  $('#add-timer').hidden = draft.timers.length >= MAX_TIMERS;
+}
+function timerCard(t){
+  const c = document.createElement('div');
+  c.className = 'tcard';
+  const id = 't-' + t.id;
+  c.innerHTML =
+    `<div class="trow">
+       <input class="in t-name" type="text" id="${id}-name" maxlength="40" placeholder="名前（例：定時、締切）" aria-label="タイマーの名前">
+       <button type="button" class="btn del t-del">削除</button>
+     </div>
+     <div class="seg" role="radiogroup" aria-label="タイマーの種類">
+       <label data-v="daily"><input type="radio" name="${id}-type" value="daily">毎日の時刻</label>
+       <label data-v="date"><input type="radio" name="${id}-type" value="date">特定の日時</label>
+     </div>
+     <div class="t-fields"></div>
+     <p class="hint t-hint"></p>
+     <p class="err t-err"></p>`;
+  const nameIn = c.querySelector('.t-name');
+  nameIn.value = t.name;
+  nameIn.addEventListener('input', () => { t.name = nameIn.value; });
+  c.querySelector('.t-del').addEventListener('click', () => {
+    draft.timers = draft.timers.filter(x => x !== t);
+    renderTimerList();
+    $('#add-timer').focus();
+  });
+  c.querySelectorAll('.seg input').forEach(r => {
+    r.checked = r.value === t.type;
+    r.addEventListener('change', () => { if (r.checked) { t.type = r.value; renderFields(c, t); } });
+  });
+  renderFields(c, t);
+  return c;
+}
+function renderFields(c, t){
+  const id = 't-' + t.id;
+  c.querySelectorAll('.seg label').forEach(l => l.classList.toggle('on', l.dataset.v === t.type));
+  const box = c.querySelector('.t-fields');
+  if (t.type === 'daily') {
+    box.className = 't-fields two';
+    box.innerHTML =
+      `<div class="field"><label for="${id}-ds">開始</label><input class="in" type="time" id="${id}-ds" data-k="dStart"></div>
+       <div class="field"><label for="${id}-de">目標の時刻</label><input class="in" type="time" id="${id}-de" data-k="dEnd"></div>`;
+    c.querySelector('.t-hint').textContent = '開始から目標の時刻までバーが進みます。目標を過ぎた日は「今日はおわり」になり、0時にリセットされます。';
+  } else {
+    box.className = 't-fields two stack';
+    box.innerHTML =
+      `<div class="field"><label for="${id}-xs">開始日時</label><input class="in" type="datetime-local" id="${id}-xs" data-k="xStart"></div>
+       <div class="field"><label for="${id}-xe">目標の日時</label><input class="in" type="datetime-local" id="${id}-xe" data-k="xEnd"></div>`;
+    c.querySelector('.t-hint').textContent = '開始日時から目標の日時までの経過をバーで表示します。';
+  }
+  box.querySelectorAll('input').forEach(inp => {
+    inp.value = t[inp.dataset.k] || '';
+    inp.addEventListener('input', () => { t[inp.dataset.k] = inp.value; });
+    inp.addEventListener('change', () => { t[inp.dataset.k] = inp.value; });
+  });
+  c.querySelector('.t-err').textContent = '';
+}
+$('#add-timer').addEventListener('click', () => {
+  if (draft.timers.length >= MAX_TIMERS) return;
+  draft.timers.push(blankTimer());
+  renderTimerList();
+  const last = timerList.lastElementChild;
+  if (last) { const n = last.querySelector('.t-name'); n.focus({ preventScroll: true }); n.scrollIntoView({ block: 'center' }); }
+});
+
+function clearErrors(){
+  form.querySelectorAll('.err').forEach(e => { e.textContent = ''; });
+  form.querySelectorAll('[aria-invalid]').forEach(e => e.removeAttribute('aria-invalid'));
+}
+function validate(){
+  clearErrors();
+  const now = new Date();
+  let first = null;
+  const flag = (el, errEl, msg) => {
+    errEl.textContent = msg;
+    if (el) { el.setAttribute('aria-invalid', 'true'); if (!first) first = el; }
+    else if (!first) first = errEl;
+  };
+
+  const b = parseDate(fBirthday.value);
+  if (!b) flag(fBirthday, $('#e-birthday'), '生年月日を入力してください。');
+  else if (b > now) flag(fBirthday, $('#e-birthday'), '生年月日が未来の日付になっています。');
+  else if (b.getFullYear() < 1900) flag(fBirthday, $('#e-birthday'), '1900年以降の日付を入力してください。');
+
+  const ls = Number(fLifespan.value);
+  if (!Number.isInteger(ls) || ls < 1 || ls > 150) flag(fLifespan, $('#e-lifespan'), '1〜150の整数で入力してください。');
+
+  const timers = [];
+  timerList.querySelectorAll('.tcard').forEach((card, idx) => {
+    const t = draft.timers[idx];
+    const errEl = card.querySelector('.t-err');
+    const name = (t.name || '').trim().slice(0, 40) || 'タイマー';
+    if (t.type === 'daily') {
+      const e = parseHM(t.dEnd), s = parseHM(t.dStart) || [0, 0];
+      const eIn = card.querySelector('[data-k="dEnd"]'), sIn = card.querySelector('[data-k="dStart"]');
+      if (!e) return flag(eIn, errEl, '目標の時刻を入力してください。');
+      if (s[0] * 60 + s[1] >= e[0] * 60 + e[1]) return flag(sIn, errEl, '開始は目標の時刻より前にしてください。');
+      timers.push({ id: t.id, name, type: 'daily', start: hmStr(s), end: hmStr(e) });
+    } else {
+      const e = parseDT(t.xEnd), s = parseDT(t.xStart);
+      const eIn = card.querySelector('[data-k="xEnd"]'), sIn = card.querySelector('[data-k="xStart"]');
+      if (!e) return flag(eIn, errEl, '目標の日時を入力してください。');
+      if (!s) return flag(sIn, errEl, '開始日時を入力してください。');
+      if (s >= e) return flag(sIn, errEl, '開始日時は目標の日時より前にしてください。');
+      timers.push({ id: t.id, name, type: 'date', start: dtLocal(s), end: dtLocal(e) });
+    }
+  });
+
+  if (first) {
+    $('#e-form').textContent = '赤字の項目を直してから保存してください。';
+    first.focus({ preventScroll: true });
+    first.scrollIntoView({ block: 'center' });
+    return null;
+  }
+  return normalize({ birthday: fBirthday.value, lifespan: ls, timers });
+}
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  const s = validate();
+  if (!s) return;
+  applySettings(s);
+  lsSet(LS_SETTINGS, JSON.stringify(s));
+  closeSettings();
+  toast('保存しました');
+});
+$('#cancel-btn').addEventListener('click', closeSettings);
+$('#close-btn').addEventListener('click', closeSettings);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !scrim.hidden) closeSettings(); });
+$('#settings-btn').addEventListener('click', () => openSettings());
+$('#notice-btn').addEventListener('click', () => openSettings());
+
+function applySettings(s){
+  state.settings = s;
+  state.isSample = false;
+  buildMeters();
+  tick();
+}
+
+/* ---------- storage note ---------- */
+function renderSync(){
+  $('#sync-note').textContent = 'この設定はこの端末の中だけに保存され、どこにも送信されません。機種変更やブラウザのデータ削除をしたときは、もう一度入力してください。';
+}
+
+/* ---------- start ---------- */
+renderHide();
+buildMeters();
+tick();
+setInterval(tick, 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+}
+})();
+</script>
+</body>
+</html>
