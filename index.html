@@ -26,6 +26,8 @@
   --fill:#e9e9e5;
   --line:#2c2c30;
   --danger:#ff8070;
+  --del:#eb5545;
+  --on-del:#ffffff;
   --focus:#9ec5ff;
   --scrim:rgba(0,0,0,.6);
   --font-num:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue","Segoe UI",Roboto,Arial,sans-serif;
@@ -86,7 +88,13 @@ button{font:inherit;color:inherit}
 
 /* reorder: long-press a timer row, then drag it up or down */
 .trows{display:flex;flex-direction:column;gap:28px}
-.meter.custom{position:relative;z-index:0;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.meter.custom{display:block;position:relative;z-index:0;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;cursor:pointer}
+.meter.custom .swipe{display:grid;grid-template-columns:32px minmax(0,1fr);column-gap:14px;align-items:center;position:relative;z-index:1;transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.meter.custom.swiping .swipe{transition:none}
+.del-btn{position:absolute;right:0;top:50%;width:62px;height:62px;margin-top:-31px;border-radius:50%;border:0;padding:0;background:var(--del);color:var(--on-del);display:grid;place-items:center;cursor:pointer;opacity:0;transform:scale(.5);transition:opacity .2s ease,transform .2s ease;pointer-events:none;z-index:0}
+.del-btn svg{width:26px;height:26px}
+.meter.custom.open .del-btn{opacity:1;transform:scale(1);pointer-events:auto}
+.meter.custom.removing{transition:opacity .2s ease,transform .2s ease;opacity:0;transform:translateX(-40px)}
 .meter.custom::before{content:"";position:absolute;inset:-12px;border-radius:18px;background:var(--surface);border:1px solid var(--line);opacity:0;z-index:-1;pointer-events:none;transition:opacity .15s ease}
 .meter.custom.pressing::before{opacity:.55;transition:opacity .38s ease}
 .meter.custom.dragging{z-index:5;cursor:grabbing}
@@ -111,6 +119,7 @@ button{font:inherit;color:inherit}
 .sheet-head{position:sticky;top:0;z-index:2;background:var(--surface);display:flex;align-items:center;justify-content:space-between;padding-block:14px 10px}
 .sheet-head h2{margin:0;font-size:19px;font-weight:700;letter-spacing:.06em}
 .group{display:flex;flex-direction:column;gap:14px;padding-block:14px 22px;border-bottom:1px solid var(--line)}
+#form.single .group{border-bottom:0;padding-bottom:4px}
 .group h3{margin:0;font-size:13px;font-weight:700;letter-spacing:.14em;color:var(--muted)}
 .field{display:flex;flex-direction:column;gap:6px;min-width:0}
 .field>label,.lbl{font-size:13px;font-weight:600;color:var(--fg)}
@@ -153,9 +162,12 @@ button{font:inherit;color:inherit}
 
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,12px);opacity:0;z-index:60;background:var(--fill);color:var(--bg);font-size:14px;font-weight:600;padding:10px 18px;border-radius:999px;transition:opacity .2s ease,transform .2s ease;pointer-events:none}
 .toast.show{opacity:1;transform:translate(-50%,0)}
+.toast{display:flex;align-items:center;gap:14px;width:max-content;max-width:calc(100vw - 32px);border-radius:22px}
+.toast.has-act{pointer-events:auto}
+.toast-act{flex:none;background:none;border:0;padding:4px 2px;color:var(--bg);font-size:14px;font-weight:800;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 
 @media (prefers-reduced-motion: reduce){
-  .bar-fill,.toast,.icon-btn,.meter.custom.settling,.trows.sorting .meter.custom{transition:none}
+  .bar-fill,.toast,.icon-btn,.meter.custom.settling,.trows.sorting .meter.custom,.meter.custom .swipe,.del-btn,.meter.custom.removing{transition:none}
 }
 </style>
 </head>
@@ -200,7 +212,7 @@ button{font:inherit;color:inherit}
         </button>
       </div>
 
-      <section class="group">
+      <section class="group" id="life-group">
         <h3>人生</h3>
         <div class="field">
           <label for="f-birthday">生年月日</label>
@@ -226,8 +238,8 @@ button{font:inherit;color:inherit}
       </section>
 
       <section class="group">
-        <h3>設定した時間まで</h3>
-        <p class="hint">「今日」の下に表示されます。毎日の時刻（例：定時 18:00）と、特定の日時（例：締切 12/25 17:00）を登録できます。</p>
+        <h3 id="timer-h">設定した時間まで</h3>
+        <p class="hint" id="timer-hint">「今日」の下に表示されます。毎日の時刻（例：定時 18:00）と、特定の日時（例：締切 12/25 17:00）を登録できます。</p>
         <div class="tlist" id="timer-list"></div>
         <button type="button" class="btn add" id="add-timer">＋ タイマーを追加</button>
       </section>
@@ -391,6 +403,8 @@ const ICONS = {
   date: SVG('<path d="M5.5 21V3.8"/><path d="M5.5 4h12l-2.4 4.3 2.4 4.2h-12"/>')
 };
 
+const TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9.5 3.5h5M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7M10 11v6M14 11v6"/></svg>';
+
 /* ---------- state ---------- */
 const state = { settings: null, isSample: true, hide: lsGet(LS_HIDE) === '1' };
 
@@ -407,7 +421,7 @@ let rows = {};
 function meterEl(label, icon, custom){
   const row = document.createElement('div');
   row.className = 'meter' + (custom ? ' custom' : '');
-  row.innerHTML =
+  const inner =
     `<div class="meter-icon" aria-hidden="true">${ICONS[icon]}</div>
      <div class="meter-body">
        <div class="meter-head">
@@ -417,11 +431,14 @@ function meterEl(label, icon, custom){
        <div class="bar" aria-hidden="true"><div class="bar-fill"></div></div>
        ${custom ? '<div class="m-cap"></div>' : ''}
      </div>`;
+  row.innerHTML = custom
+    ? `<div class="swipe">${inner}</div><button type="button" class="del-btn" tabindex="-1">${TRASH}</button>`
+    : inner;
   row.querySelector('.m-label').textContent = label;
   return {
     row, ato: row.querySelector('.m-ato'), val: row.querySelector('.m-val'),
     pct: row.querySelector('.m-pct'), fill: row.querySelector('.bar-fill'),
-    cap: row.querySelector('.m-cap'), c: {}
+    cap: row.querySelector('.m-cap'), swipe: row.querySelector('.swipe'), del: row.querySelector('.del-btn'), c: {}
   };
 }
 function setMeter(m, o){
@@ -442,10 +459,12 @@ function buildMeters(){
   metersEl.textContent = '';
   rows = { life: meterEl('人生', 'life'), year: meterEl('今年', 'year'), month: meterEl('今月', 'month'), day: meterEl('今日', 'day'), timers: [] };
   [rows.life, rows.year, rows.month, rows.day].forEach(m => metersEl.appendChild(m.row));
-  const sortable = !state.isSample && state.settings.timers.length > 1;
+  const editable = !state.isSample && state.settings.timers.length > 0;
+  const sortable = editable && state.settings.timers.length > 1;
+  openRow = null;
   const sec = document.createElement('div');
   sec.className = 'sec';
-  sec.innerHTML = '<span>設定した時間まで</span><span class="sec-line"></span>' + (sortable ? '<span class="sec-hint">長押しで並べ替え</span>' : '');
+  sec.innerHTML = '<span>設定した時間まで</span><span class="sec-line"></span>' + (editable ? `<span class="sec-hint">${sortable ? 'タップで編集・長押しで並べ替え' : 'タップで編集'}</span>` : '');
   metersEl.appendChild(sec);
   timerRowsEl = document.createElement('div');
   timerRowsEl.className = 'trows';
@@ -455,56 +474,204 @@ function buildMeters(){
     m.row.dataset.id = t.id;
     rows.timers.push(m);
     timerRowsEl.appendChild(m.row);
-    if (sortable) attachReorder(m);
+    if (editable) attachGestures(m, sortable);
   }
   if (rows.timers.length) metersEl.appendChild(timerRowsEl);
   const add = document.createElement('button');
   add.type = 'button';
   add.className = 'add-link';
-  add.textContent = state.settings.timers.length ? '＋ タイマーを追加・編集' : '＋ 時刻や日時までのタイマーを追加';
-  add.addEventListener('click', () => openSettings({ addTimer: !state.settings.timers.length }));
+  add.textContent = state.settings.timers.length ? '＋ タイマーを追加' : '＋ 時刻や日時までのタイマーを追加';
+  add.addEventListener('click', () => state.isSample ? openSettings({ addTimer: true }) : openSettings({ newTimer: true }));
   metersEl.appendChild(add);
   $('#notice').hidden = !state.isSample;
 }
 
-/* ---------- reorder timers (long-press, then drag) ---------- */
+/* ---------- timer rows: tap = edit, swipe left = delete, long-press = reorder ---------- */
 let timerRowsEl = null;
 let press = null;
-const LONG_PRESS_MS = 380, MOVE_TOL = 10, EDGE = 90;
+let openRow = null;
+let lastTouch = 0;
+const LONG_PRESS_MS = 380, MOVE_TOL = 10, EDGE = 90, REVEAL = 84;
 
-function attachReorder(m){
+function attachGestures(m, sortable){
   const row = m.row;
+  row.tabIndex = 0;
+  m.del.setAttribute('aria-label', `「${m.t.name}」を削除`);
+  m.del.addEventListener('click', e => { e.stopPropagation(); deleteTimer(m.t.id); });
+  row.addEventListener('keydown', e => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target === row) { e.preventDefault(); openSettings({ editId: m.t.id }); }
+  });
   row.addEventListener('touchstart', e => {
-    if (e.touches.length !== 1) { pressEnd(); return; }
-    pressStart(m, e.touches[0].clientX, e.touches[0].clientY);
+    lastTouch = Date.now();
+    if (e.target.closest('.del-btn')) return;
+    if (e.touches.length !== 1) { pressEnd(false); return; }
+    pressStart(m, e.touches[0].clientX, e.touches[0].clientY, sortable);
   }, { passive: true });
   row.addEventListener('touchmove', e => {
     if (!press || press.m !== m) return;
     const t = e.touches[0];
     pressMove(t.clientX, t.clientY);
-    if (press && press.active && e.cancelable) e.preventDefault();
+    if (press && press.mode !== 'pending' && e.cancelable) e.preventDefault();
   }, { passive: false });
-  row.addEventListener('touchend', () => pressEnd(), { passive: true });
-  row.addEventListener('touchcancel', () => pressEnd(), { passive: true });
+  row.addEventListener('touchend', e => {
+    lastTouch = Date.now();
+    if (!press || press.m !== m) return;
+    if (pressEnd(true)) { if (e.cancelable) e.preventDefault(); openSettings({ editId: m.t.id }); }
+  }, { passive: false });
+  row.addEventListener('touchcancel', () => pressEnd(false), { passive: true });
   row.addEventListener('mousedown', e => {
-    if (e.button !== 0) return;
-    pressStart(m, e.clientX, e.clientY);
-    const mv = ev => { pressMove(ev.clientX, ev.clientY); if (press && press.active) ev.preventDefault(); };
-    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); pressEnd(); };
+    if (e.button !== 0 || Date.now() - lastTouch < 800 || e.target.closest('.del-btn')) return;
+    pressStart(m, e.clientX, e.clientY, sortable);
+    const mv = ev => { pressMove(ev.clientX, ev.clientY); if (press && press.mode !== 'pending') ev.preventDefault(); };
+    const up = () => {
+      window.removeEventListener('mousemove', mv);
+      window.removeEventListener('mouseup', up);
+      if (pressEnd(true)) openSettings({ editId: m.t.id });
+    };
     window.addEventListener('mousemove', mv);
     window.addEventListener('mouseup', up);
   });
   row.addEventListener('contextmenu', e => { if (press) e.preventDefault(); });
 }
-function pressStart(m, x, y){
-  pressEnd();
-  press = { m, x0: x, y0: y, y, base: y, active: false, moved: false, raf: 0 };
-  m.row.classList.add('pressing');
-  press.timer = setTimeout(activateDrag, LONG_PRESS_MS);
+
+function pressStart(m, x, y, sortable){
+  pressEnd(false);
+  const wasOpen = openRow === m;
+  press = { m, x0: x, y0: y, y, base: y, t0: Date.now(), mode: 'pending', moved: false, raf: 0, swipeBase: wasOpen ? -REVEAL : 0, off: null, wasOpen };
+  if (sortable && !wasOpen) {
+    m.row.classList.add('pressing');
+    press.timer = setTimeout(activateDrag, LONG_PRESS_MS);
+  }
 }
-function activateDrag(){
+function pressMove(x, y){
   if (!press) return;
-  press.active = true;
+  const dx = x - press.x0, dy = y - press.y0;
+  if (press.mode === 'pending') {
+    const ax = Math.abs(dx), ay = Math.abs(dy);
+    if (ax > MOVE_TOL && ax > ay * 1.2) {
+      clearTimeout(press.timer);
+      press.m.row.classList.remove('pressing');
+      press.mode = 'swipe';
+      if (openRow && openRow !== press.m) closeSwipe(openRow);
+    } else if (ax > MOVE_TOL || ay > MOVE_TOL) {
+      const p = press;
+      pressEnd(false);
+      if (p.wasOpen) closeSwipe(p.m);
+      return;
+    } else {
+      return;
+    }
+  }
+  if (press.mode === 'swipe') {
+    let off = press.swipeBase + dx;
+    if (off > 0) off /= 4;
+    else if (off < -REVEAL) off = -REVEAL + (off + REVEAL) / 3;
+    press.off = off;
+    setSwipe(press.m, off, false);
+    return;
+  }
+  if (Math.abs(dy) > MOVE_TOL) press.moved = true;
+  press.y = y;
+  reorderUnderFinger();
+  applyDrag();
+}
+/* returns true when the gesture was a plain tap */
+function pressEnd(isRelease){
+  if (!press) return false;
+  const p = press;
+  press = null;
+  clearTimeout(p.timer);
+  cancelAnimationFrame(p.raf);
+  const row = p.m.row;
+  row.classList.remove('pressing');
+  if (p.mode === 'pending') {
+    if (!isRelease) return false;
+    if (p.wasOpen) { closeSwipe(p.m); return false; }
+    return Date.now() - p.t0 < 600;
+  }
+  if (p.mode === 'swipe') {
+    const off = p.off == null ? p.swipeBase : p.off;
+    if (off < -REVEAL / 2) openSwipe(p.m); else closeSwipe(p.m);
+    return false;
+  }
+  const list = timerRowsEl;
+  row.classList.add('settling');
+  row.style.transform = '';
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    row.classList.remove('settling', 'dragging');
+    list.classList.remove('sorting');
+  };
+  row.addEventListener('transitionend', e => { if (e.propertyName === 'transform') finish(); });
+  setTimeout(finish, 260);
+  commitOrder();
+  return false;
+}
+
+/* --- swipe to reveal the delete button --- */
+function setSwipe(m, x, animate){
+  m.row.classList.toggle('swiping', !animate);
+  m.swipe.style.transform = x ? `translateX(${x}px)` : '';
+  if (animate) {
+    m.del.style.opacity = '';
+    m.del.style.transform = '';
+  } else {
+    const k = Math.max(0, Math.min(1, -x / REVEAL));
+    m.del.style.opacity = String(k);
+    m.del.style.transform = `scale(${0.5 + 0.5 * k})`;
+  }
+}
+function openSwipe(m){
+  if (openRow && openRow !== m) closeSwipe(openRow);
+  openRow = m;
+  m.row.classList.add('open');
+  m.del.tabIndex = 0;
+  setSwipe(m, -REVEAL, true);
+}
+function closeSwipe(m){
+  if (!m) return;
+  m.row.classList.remove('open');
+  m.del.tabIndex = -1;
+  setSwipe(m, 0, true);
+  if (openRow === m) openRow = null;
+}
+function closeOnOutside(e){
+  if (openRow && !openRow.row.contains(e.target)) closeSwipe(openRow);
+}
+document.addEventListener('touchstart', closeOnOutside, { passive: true, capture: true });
+document.addEventListener('mousedown', closeOnOutside, true);
+
+function saveLocal(){ lsSet(LS_SETTINGS, JSON.stringify(state.settings)); }
+
+function deleteTimer(id){
+  const idx = state.settings.timers.findIndex(t => t.id === id);
+  if (idx < 0) return;
+  const removed = state.settings.timers[idx];
+  const m = rows.timers.find(x => x.t.id === id);
+  openRow = null;
+  state.settings = { ...state.settings, timers: state.settings.timers.filter(t => t.id !== id) };
+  saveLocal();
+  const rebuild = () => { buildMeters(); tick(); };
+  if (m) { m.row.classList.add('removing'); setTimeout(rebuild, 200); } else rebuild();
+  toast(`「${removed.name}」を削除しました`, {
+    label: '元に戻す',
+    run: () => {
+      if (state.settings.timers.some(t => t.id === removed.id)) return;
+      const timers = state.settings.timers.slice();
+      timers.splice(Math.min(idx, timers.length), 0, removed);
+      state.settings = { ...state.settings, timers };
+      saveLocal();
+      rebuild();
+    }
+  });
+}
+
+/* --- long-press, then drag to reorder --- */
+function activateDrag(){
+  if (!press || press.mode !== 'pending') return;
+  press.mode = 'drag';
   const row = press.m.row;
   row.classList.remove('pressing');
   row.classList.add('dragging');
@@ -515,17 +682,6 @@ function activateDrag(){
 }
 function applyDrag(){
   press.m.row.style.transform = `translateY(${press.y - press.base}px) scale(1.02)`;
-}
-function pressMove(x, y){
-  if (!press) return;
-  if (!press.active) {
-    if (Math.abs(x - press.x0) > MOVE_TOL || Math.abs(y - press.y0) > MOVE_TOL) pressEnd();
-    return;
-  }
-  if (Math.abs(y - press.y0) > MOVE_TOL) press.moved = true;
-  press.y = y;
-  reorderUnderFinger();
-  applyDrag();
 }
 function reorderUnderFinger(){
   const row = press.m.row;
@@ -549,7 +705,7 @@ function slide(other, mutate){
   other.style.transform = '';
 }
 function autoScroll(){
-  if (!press || !press.active) return;
+  if (!press || press.mode !== 'drag') return;
   if (press.moved) {
     const h = window.innerHeight;
     let v = 0;
@@ -564,29 +720,6 @@ function autoScroll(){
   }
   press.raf = requestAnimationFrame(autoScroll);
 }
-function pressEnd(){
-  if (!press) return;
-  const p = press;
-  press = null;
-  clearTimeout(p.timer);
-  cancelAnimationFrame(p.raf);
-  const row = p.m.row;
-  row.classList.remove('pressing');
-  if (!p.active) return;
-  const list = timerRowsEl;
-  row.classList.add('settling');
-  row.style.transform = '';
-  let finished = false;
-  const finish = () => {
-    if (finished) return;
-    finished = true;
-    row.classList.remove('settling', 'dragging');
-    list.classList.remove('sorting');
-  };
-  row.addEventListener('transitionend', e => { if (e.propertyName === 'transform') finish(); });
-  setTimeout(finish, 260);
-  commitOrder();
-}
 function commitOrder(){
   const ids = [...timerRowsEl.children].map(r => r.dataset.id);
   if (ids.join('|') === state.settings.timers.map(t => t.id).join('|')) return;
@@ -594,7 +727,7 @@ function commitOrder(){
   const mById = new Map(rows.timers.map(m => [m.t.id, m]));
   state.settings = { ...state.settings, timers: ids.map(id => tById.get(id)).filter(Boolean) };
   rows.timers = ids.map(id => mById.get(id)).filter(Boolean);
-  lsSet(LS_SETTINGS, JSON.stringify(state.settings));
+  saveLocal();
   toast('並び順を保存しました');
 }
 
@@ -651,14 +784,34 @@ hideBtn.addEventListener('click', () => {
 });
 
 /* ---------- toast ---------- */
-let toastTimer;
-function toast(msg){
+let toastTimer, toastHideTimer;
+function hideToast(){
   const t = $('#toast');
-  t.textContent = msg;
+  clearTimeout(toastTimer);
+  t.classList.remove('show');
+  clearTimeout(toastHideTimer);
+  toastHideTimer = setTimeout(() => { t.hidden = true; }, 250);
+}
+function toast(msg, action){
+  const t = $('#toast');
+  clearTimeout(toastTimer);
+  clearTimeout(toastHideTimer);
+  t.textContent = '';
+  const span = document.createElement('span');
+  span.textContent = msg;
+  t.appendChild(span);
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'toast-act';
+    b.textContent = action.label;
+    b.addEventListener('click', () => { hideToast(); action.run(); });
+    t.appendChild(b);
+  }
+  t.classList.toggle('has-act', !!action);
   t.hidden = false;
   requestAnimationFrame(() => t.classList.add('show'));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.classList.remove('show'); setTimeout(() => { t.hidden = true; }, 250); }, 1800);
+  toastTimer = setTimeout(hideToast, action ? 5000 : 1800);
 }
 
 /* ---------- settings sheet ---------- */
@@ -687,12 +840,25 @@ function blankTimer(){
 function openSettings(opts = {}){
   const now = new Date();
   const s = state.settings;
-  draft = {
-    timers: state.isSample
-      ? [toDraftTimer(s.timers[0], now)]
-      : s.timers.map(t => toDraftTimer(t, now))
-  };
-  if (opts.addTimer && draft.timers.length < MAX_TIMERS) draft.timers.push(blankTimer());
+  const single = !state.isSample && !!(opts.newTimer || opts.editId);
+  let timers;
+  if (single) {
+    const t = opts.editId ? s.timers.find(x => x.id === opts.editId) : null;
+    if (opts.editId && !t) return;
+    if (!t && s.timers.length >= MAX_TIMERS) { toast(`タイマーは${MAX_TIMERS}件まで登録できます`); return; }
+    timers = [t ? toDraftTimer(t, now) : blankTimer()];
+  } else {
+    timers = state.isSample ? [toDraftTimer(s.timers[0], now)] : s.timers.map(t => toDraftTimer(t, now));
+    if (opts.addTimer && timers.length < MAX_TIMERS) timers.push(blankTimer());
+  }
+  draft = { mode: single ? 'single' : 'full', editId: single && opts.editId ? opts.editId : null, timers };
+  $('#sheet-title').textContent = !single ? '設定' : (draft.editId ? 'タイマーを編集' : 'タイマーを追加');
+  $('#life-group').hidden = single;
+  $('#timer-h').hidden = single;
+  $('#timer-hint').hidden = single;
+  $('#sync-note').hidden = single;
+  form.classList.toggle('single', single);
+  $('#sheet').scrollTop = 0;
   fBirthday.value = state.isSample ? '' : s.birthday;
   fBirthday.max = dateLocal(now);
   fLifespan.value = String(s.lifespan);
@@ -703,7 +869,8 @@ function openSettings(opts = {}){
   lastFocus = document.activeElement;
   scrim.hidden = false;
   document.documentElement.style.overflow = 'hidden';
-  const target = opts.addTimer ? timerList.lastElementChild && timerList.lastElementChild.querySelector('.t-name') : fBirthday;
+  const lastName = timerList.lastElementChild && timerList.lastElementChild.querySelector('.t-name');
+  const target = (single && !draft.editId) || opts.addTimer ? lastName : (single ? null : fBirthday);
   setTimeout(() => {
     if (target) { target.focus({ preventScroll: true }); target.scrollIntoView({ block: 'center' }); }
   }, 30);
@@ -737,7 +904,7 @@ $('#presets').addEventListener('click', e => {
 function renderTimerList(){
   timerList.textContent = '';
   draft.timers.forEach(t => timerList.appendChild(timerCard(t)));
-  $('#add-timer').hidden = draft.timers.length >= MAX_TIMERS;
+  $('#add-timer').hidden = draft.mode === 'single' || draft.timers.length >= MAX_TIMERS;
 }
 function timerCard(t){
   const c = document.createElement('div');
@@ -758,7 +925,15 @@ function timerCard(t){
   const nameIn = c.querySelector('.t-name');
   nameIn.value = t.name;
   nameIn.addEventListener('input', () => { t.name = nameIn.value; });
-  c.querySelector('.t-del').addEventListener('click', () => {
+  const delBtn = c.querySelector('.t-del');
+  if (draft.mode === 'single' && !draft.editId) delBtn.hidden = true;
+  delBtn.addEventListener('click', () => {
+    if (draft.mode === 'single') {
+      const id = draft.editId;
+      closeSettings();
+      if (id) deleteTimer(id);
+      return;
+    }
     draft.timers = draft.timers.filter(x => x !== t);
     renderTimerList();
     $('#add-timer').focus();
@@ -858,10 +1033,19 @@ form.addEventListener('submit', e => {
   e.preventDefault();
   const s = validate();
   if (!s) return;
-  applySettings(s);
-  lsSet(LS_SETTINGS, JSON.stringify(s));
+  let next = s, msg = '保存しました';
+  if (draft.mode === 'single') {
+    const t = s.timers[0];
+    const list = state.settings.timers.slice();
+    const i = list.findIndex(x => x.id === t.id);
+    if (i >= 0) list[i] = t; else list.push(t);
+    next = { ...state.settings, timers: list };
+    msg = i >= 0 ? `「${t.name}」を変更しました` : `「${t.name}」を追加しました`;
+  }
+  applySettings(next);
+  lsSet(LS_SETTINGS, JSON.stringify(next));
   closeSettings();
-  toast('保存しました');
+  toast(msg);
 });
 $('#cancel-btn').addEventListener('click', closeSettings);
 $('#close-btn').addEventListener('click', closeSettings);
