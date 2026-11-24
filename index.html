@@ -81,7 +81,18 @@ button{font:inherit;color:inherit}
 .meter.masked .m-val{letter-spacing:.05em}
 
 .sec{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.14em;margin-top:4px}
-.sec::after{content:"";flex:1;height:1px;background:var(--line)}
+.sec-line{flex:1;height:1px;background:var(--line)}
+.sec-hint{font-size:11px;font-weight:500;letter-spacing:.06em}
+
+/* reorder: long-press a timer row, then drag it up or down */
+.trows{display:flex;flex-direction:column;gap:28px}
+.meter.custom{position:relative;z-index:0;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.meter.custom::before{content:"";position:absolute;inset:-12px;border-radius:18px;background:var(--surface);border:1px solid var(--line);opacity:0;z-index:-1;pointer-events:none;transition:opacity .15s ease}
+.meter.custom.pressing::before{opacity:.55;transition:opacity .38s ease}
+.meter.custom.dragging{z-index:5;cursor:grabbing}
+.meter.custom.dragging::before{opacity:1;box-shadow:0 14px 36px rgba(0,0,0,.65)}
+.meter.custom.settling{transition:transform .18s ease}
+.trows.sorting .meter.custom:not(.dragging){transition:transform .2s ease}
 .add-link{align-self:flex-start;background:none;border:1px dashed var(--line);color:var(--muted);border-radius:12px;padding:10px 14px;font-size:14px;cursor:pointer}
 .add-link:hover{color:var(--fg);border-color:var(--muted)}
 
@@ -144,7 +155,7 @@ button{font:inherit;color:inherit}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 
 @media (prefers-reduced-motion: reduce){
-  .bar-fill,.toast,.icon-btn{transition:none}
+  .bar-fill,.toast,.icon-btn,.meter.custom.settling,.trows.sorting .meter.custom{transition:none}
 }
 </style>
 </head>
@@ -427,19 +438,26 @@ function setMeter(m, o){
   if (m.cap && o.cap != null && m.c.cap !== o.cap) { m.cap.textContent = o.cap; m.c.cap = o.cap; }
 }
 function buildMeters(){
+  if (press) { clearTimeout(press.timer); cancelAnimationFrame(press.raf); press = null; }
   metersEl.textContent = '';
   rows = { life: meterEl('人生', 'life'), year: meterEl('今年', 'year'), month: meterEl('今月', 'month'), day: meterEl('今日', 'day'), timers: [] };
   [rows.life, rows.year, rows.month, rows.day].forEach(m => metersEl.appendChild(m.row));
+  const sortable = !state.isSample && state.settings.timers.length > 1;
   const sec = document.createElement('div');
   sec.className = 'sec';
-  sec.textContent = '設定した時間まで';
+  sec.innerHTML = '<span>設定した時間まで</span><span class="sec-line"></span>' + (sortable ? '<span class="sec-hint">長押しで並べ替え</span>' : '');
   metersEl.appendChild(sec);
+  timerRowsEl = document.createElement('div');
+  timerRowsEl.className = 'trows';
   for (const t of state.settings.timers) {
     const m = meterEl(t.name, t.type === 'daily' ? 'daily' : 'date', true);
     m.t = t;
+    m.row.dataset.id = t.id;
     rows.timers.push(m);
-    metersEl.appendChild(m.row);
+    timerRowsEl.appendChild(m.row);
+    if (sortable) attachReorder(m);
   }
+  if (rows.timers.length) metersEl.appendChild(timerRowsEl);
   const add = document.createElement('button');
   add.type = 'button';
   add.className = 'add-link';
@@ -447,6 +465,137 @@ function buildMeters(){
   add.addEventListener('click', () => openSettings({ addTimer: !state.settings.timers.length }));
   metersEl.appendChild(add);
   $('#notice').hidden = !state.isSample;
+}
+
+/* ---------- reorder timers (long-press, then drag) ---------- */
+let timerRowsEl = null;
+let press = null;
+const LONG_PRESS_MS = 380, MOVE_TOL = 10, EDGE = 90;
+
+function attachReorder(m){
+  const row = m.row;
+  row.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) { pressEnd(); return; }
+    pressStart(m, e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  row.addEventListener('touchmove', e => {
+    if (!press || press.m !== m) return;
+    const t = e.touches[0];
+    pressMove(t.clientX, t.clientY);
+    if (press && press.active && e.cancelable) e.preventDefault();
+  }, { passive: false });
+  row.addEventListener('touchend', () => pressEnd(), { passive: true });
+  row.addEventListener('touchcancel', () => pressEnd(), { passive: true });
+  row.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    pressStart(m, e.clientX, e.clientY);
+    const mv = ev => { pressMove(ev.clientX, ev.clientY); if (press && press.active) ev.preventDefault(); };
+    const up = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); pressEnd(); };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+  });
+  row.addEventListener('contextmenu', e => { if (press) e.preventDefault(); });
+}
+function pressStart(m, x, y){
+  pressEnd();
+  press = { m, x0: x, y0: y, y, base: y, active: false, moved: false, raf: 0 };
+  m.row.classList.add('pressing');
+  press.timer = setTimeout(activateDrag, LONG_PRESS_MS);
+}
+function activateDrag(){
+  if (!press) return;
+  press.active = true;
+  const row = press.m.row;
+  row.classList.remove('pressing');
+  row.classList.add('dragging');
+  timerRowsEl.classList.add('sorting');
+  applyDrag();
+  if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
+  press.raf = requestAnimationFrame(autoScroll);
+}
+function applyDrag(){
+  press.m.row.style.transform = `translateY(${press.y - press.base}px) scale(1.02)`;
+}
+function pressMove(x, y){
+  if (!press) return;
+  if (!press.active) {
+    if (Math.abs(x - press.x0) > MOVE_TOL || Math.abs(y - press.y0) > MOVE_TOL) pressEnd();
+    return;
+  }
+  if (Math.abs(y - press.y0) > MOVE_TOL) press.moved = true;
+  press.y = y;
+  reorderUnderFinger();
+  applyDrag();
+}
+function reorderUnderFinger(){
+  const row = press.m.row;
+  for (let guard = 0; guard < 20; guard++) {
+    const center = row.offsetTop + row.offsetHeight / 2 + (press.y - press.base);
+    const next = row.nextElementSibling, prev = row.previousElementSibling;
+    if (next && center > next.offsetTop + next.offsetHeight / 2) slide(next, () => timerRowsEl.insertBefore(next, row));
+    else if (prev && center < prev.offsetTop + prev.offsetHeight / 2) slide(prev, () => timerRowsEl.insertBefore(row, prev));
+    else break;
+  }
+}
+function slide(other, mutate){
+  const row = press.m.row;
+  const rowTop = row.offsetTop, otherTop = other.offsetTop;
+  mutate();
+  press.base += row.offsetTop - rowTop;
+  other.style.transition = 'none';
+  other.style.transform = `translateY(${otherTop - other.offsetTop}px)`;
+  void other.offsetHeight;
+  other.style.transition = '';
+  other.style.transform = '';
+}
+function autoScroll(){
+  if (!press || !press.active) return;
+  if (press.moved) {
+    const h = window.innerHeight;
+    let v = 0;
+    if (press.y < EDGE) v = -Math.ceil((EDGE - press.y) / 6);
+    else if (press.y > h - EDGE) v = Math.ceil((press.y - (h - EDGE)) / 6);
+    if (v) {
+      const before = window.scrollY;
+      window.scrollBy(0, v);
+      const moved = window.scrollY - before;
+      if (moved) { press.base -= moved; reorderUnderFinger(); applyDrag(); }
+    }
+  }
+  press.raf = requestAnimationFrame(autoScroll);
+}
+function pressEnd(){
+  if (!press) return;
+  const p = press;
+  press = null;
+  clearTimeout(p.timer);
+  cancelAnimationFrame(p.raf);
+  const row = p.m.row;
+  row.classList.remove('pressing');
+  if (!p.active) return;
+  const list = timerRowsEl;
+  row.classList.add('settling');
+  row.style.transform = '';
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    row.classList.remove('settling', 'dragging');
+    list.classList.remove('sorting');
+  };
+  row.addEventListener('transitionend', e => { if (e.propertyName === 'transform') finish(); });
+  setTimeout(finish, 260);
+  commitOrder();
+}
+function commitOrder(){
+  const ids = [...timerRowsEl.children].map(r => r.dataset.id);
+  if (ids.join('|') === state.settings.timers.map(t => t.id).join('|')) return;
+  const tById = new Map(state.settings.timers.map(t => [t.id, t]));
+  const mById = new Map(rows.timers.map(m => [m.t.id, m]));
+  state.settings = { ...state.settings, timers: ids.map(id => tById.get(id)).filter(Boolean) };
+  rows.timers = ids.map(id => mById.get(id)).filter(Boolean);
+  lsSet(LS_SETTINGS, JSON.stringify(state.settings));
+  toast('並び順を保存しました');
 }
 
 /* ---------- tick ---------- */
