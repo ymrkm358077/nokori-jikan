@@ -155,6 +155,12 @@ button{font:inherit;color:inherit}
 .seg label:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:1px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .two.stack{grid-template-columns:1fr}
+.wdays{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;min-width:0}
+.wd-row{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.wd{min-height:42px;padding:0;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);color:var(--muted);font-size:15px;font-weight:600;cursor:pointer}
+.wd[aria-pressed="true"]{background:var(--fill);color:var(--bg);border-color:transparent}
+.wd[aria-invalid="true"]{border-color:var(--danger)}
+.wd-quick{display:flex;flex-wrap:wrap;gap:8px}
 .add{align-self:flex-start}
 .sync{margin:0;padding-block:16px 4px;font-size:12.5px;color:var(--muted);line-height:1.6}
 .sheet-foot{position:sticky;bottom:0;background:var(--surface);display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:10px;padding-block:12px 16px;border-top:1px solid var(--line);margin-top:8px}
@@ -239,7 +245,7 @@ button{font:inherit;color:inherit}
 
       <section class="group">
         <h3 id="timer-h">設定した時間まで</h3>
-        <p class="hint" id="timer-hint">「今日」の下に表示されます。毎日の時刻（例：定時 18:00）と、特定の日時（例：締切 12/25 17:00）を登録できます。</p>
+        <p class="hint" id="timer-hint">「今日」の下に表示されます。毎日の時刻（例：平日の定時 18:00。曜日も選べます）と、特定の日時（例：締切 12/25 17:00）を登録できます。</p>
         <div class="tlist" id="timer-list"></div>
         <button type="button" class="btn add" id="add-timer">＋ タイマーを追加</button>
       </section>
@@ -302,6 +308,30 @@ function fmtDT(d, now){
 }
 function newId(){ return 't' + Math.random().toString(36).slice(2, 9); }
 
+/* ---------- weekdays for daily timers (0 = 日 … 6 = 土) ---------- */
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+const WD_ORDER = [1, 2, 3, 4, 5, 6, 0];          // shown Monday first
+const QUICK = { all: ALL_DAYS, weekday: [1, 2, 3, 4, 5], weekend: [0, 6] };
+function normDays(v){
+  if (!Array.isArray(v)) return ALL_DAYS.slice();
+  const d = [...new Set(v.map(Number).filter(n => Number.isInteger(n) && n >= 0 && n <= 6))].sort((a, b) => a - b);
+  return d.length ? d : ALL_DAYS.slice();
+}
+function daysLabel(days){
+  const k = days.join(',');
+  if (k === '0,1,2,3,4,5,6') return '毎日';
+  if (k === '1,2,3,4,5') return '平日';
+  if (k === '0,6') return '土日';
+  return WD_ORDER.filter(d => days.includes(d)).map(d => WD[d]).join('・');
+}
+function nextDayText(days, now){
+  for (let i = 1; i <= 7; i++) {
+    const wd = (now.getDay() + i) % 7;
+    if (days.includes(wd)) return i === 1 ? '明日' : i === 7 ? `来週の${WD[wd]}曜` : `${WD[wd]}曜`;
+  }
+  return '';
+}
+
 /* ---------- settings model ---------- */
 function normalize(raw){
   if (!raw || typeof raw !== 'object') return null;
@@ -318,7 +348,7 @@ function normalize(raw){
         const e = parseHM(t.end); if (!e) continue;
         let s = parseHM(t.start) || [0, 0];
         if (s[0] * 60 + s[1] >= e[0] * 60 + e[1]) s = [0, 0];
-        timers.push({ id, name, type: 'daily', start: hmStr(s), end: hmStr(e) });
+        timers.push({ id, name, type: 'daily', start: hmStr(s), end: hmStr(e), days: normDays(t.days) });
       } else if (t.type === 'date') {
         const e = parseDT(t.end); if (!e) continue;
         const s = parseDT(t.start);
@@ -363,8 +393,10 @@ function timerInfo(t, now){
     const [sh, sm] = parseHM(t.start), [eh, em] = parseHM(t.end);
     const y = now.getFullYear(), mo = now.getMonth(), d = now.getDate();
     const s = new Date(y, mo, d, sh, sm), e = new Date(y, mo, d, eh, em);
-    const cap = `毎日 ${t.start}〜${t.end}`;
-    if (now >= e) return { done: '今日はおわり', pct: 1, cap: cap + '・0時にリセット' };
+    const days = t.days || ALL_DAYS;
+    const cap = `${daysLabel(days)} ${t.start}〜${t.end}`;
+    if (!days.includes(now.getDay())) return { done: '今日はお休み', pct: 0, pctText: '', cap: `${cap}・次は${nextDayText(days, now)}` };
+    if (now >= e) return { done: '今日はおわり', pct: 1, cap: cap + (days.length === 7 ? '・0時にリセット' : `・次は${nextDayText(days, now)}`) };
     const before = now < s;
     return { ms: e - now, pct: before ? 0 : clamp01((now - s) / (e - s)), cap: before ? `${cap}・開始まで ${fmtHMText(s - now)}` : cap };
   }
@@ -757,7 +789,7 @@ function tick(){
 
   for (const m of rows.timers) {
     const i = timerInfo(m.t, now);
-    if (i.done) setMeter(m, { done: i.done, pctText: '100%', pct: 1, cap: i.cap });
+    if (i.done) setMeter(m, { done: i.done, pctText: i.pctText != null ? i.pctText : '100%', pct: i.pct != null ? i.pct : 1, cap: i.cap });
     else setMeter(m, { html: i.long ? vLong(i.ms) : vHM(i.ms), pctText: i.pct == null ? '' : pctInt(i.pct), pct: i.pct, cap: i.cap });
   }
 
@@ -828,13 +860,14 @@ function toDraftTimer(t, now){
     id: t.id, name: t.name, type: t.type,
     dStart: t.type === 'daily' ? t.start : '09:00',
     dEnd: t.type === 'daily' ? t.end : '18:00',
+    dDays: t.type === 'daily' ? normDays(t.days) : ALL_DAYS.slice(),
     xStart: t.type === 'date' && t.start ? t.start : dtLocal(now),
     xEnd: t.type === 'date' ? t.end : ''
   };
 }
 function blankTimer(){
   const now = new Date(); now.setSeconds(0, 0);
-  return { id: newId(), name: '', type: 'daily', dStart: '09:00', dEnd: '18:00', xStart: dtLocal(now), xEnd: '' };
+  return { id: newId(), name: '', type: 'date', dStart: '09:00', dEnd: '18:00', dDays: ALL_DAYS.slice(), xStart: dtLocal(now), xEnd: '' };
 }
 
 function openSettings(opts = {}){
@@ -953,8 +986,31 @@ function renderFields(c, t){
     box.className = 't-fields two';
     box.innerHTML =
       `<div class="field"><label for="${id}-ds">開始</label><input class="in" type="time" id="${id}-ds" data-k="dStart"></div>
-       <div class="field"><label for="${id}-de">目標の時刻</label><input class="in" type="time" id="${id}-de" data-k="dEnd"></div>`;
-    c.querySelector('.t-hint').textContent = '開始から目標の時刻までバーが進みます。目標を過ぎた日は「今日はおわり」になり、0時にリセットされます。';
+       <div class="field"><label for="${id}-de">目標の時刻</label><input class="in" type="time" id="${id}-de" data-k="dEnd"></div>
+       <div class="wdays" role="group" aria-labelledby="${id}-wdl">
+         <span class="lbl" id="${id}-wdl">曜日</span>
+         <div class="wd-row">${WD_ORDER.map(d => `<button type="button" class="wd" data-d="${d}" aria-label="${WD[d]}曜日">${WD[d]}</button>`).join('')}</div>
+         <div class="wd-quick"><button type="button" class="pre" data-q="all">毎日</button><button type="button" class="pre" data-q="weekday">平日</button><button type="button" class="pre" data-q="weekend">土日</button></div>
+       </div>`;
+    c.querySelector('.t-hint').textContent = '開始から目標の時刻までバーが進みます。選んだ曜日だけ動き、それ以外の日は「今日はお休み」と表示されます。目標を過ぎた日は「今日はおわり」になり、0時にリセットされます。';
+    if (!Array.isArray(t.dDays)) t.dDays = ALL_DAYS.slice();
+    const paintDays = () => {
+      const k = t.dDays.slice().sort((a, b) => a - b).join(',');
+      box.querySelectorAll('.wd').forEach(b => { b.setAttribute('aria-pressed', String(t.dDays.includes(+b.dataset.d))); b.removeAttribute('aria-invalid'); });
+      box.querySelectorAll('.wd-quick .pre').forEach(b => b.setAttribute('aria-pressed', String(QUICK[b.dataset.q].join(',') === k)));
+    };
+    box.querySelector('.wd-row').addEventListener('click', e => {
+      const b = e.target.closest('.wd'); if (!b) return;
+      const d = +b.dataset.d;
+      t.dDays = t.dDays.includes(d) ? t.dDays.filter(x => x !== d) : t.dDays.concat(d);
+      paintDays();
+    });
+    box.querySelector('.wd-quick').addEventListener('click', e => {
+      const b = e.target.closest('.pre'); if (!b) return;
+      t.dDays = QUICK[b.dataset.q].slice();
+      paintDays();
+    });
+    paintDays();
   } else {
     box.className = 't-fields two stack';
     box.innerHTML =
@@ -1009,7 +1065,8 @@ function validate(){
       const eIn = card.querySelector('[data-k="dEnd"]'), sIn = card.querySelector('[data-k="dStart"]');
       if (!e) return flag(eIn, errEl, '目標の時刻を入力してください。');
       if (s[0] * 60 + s[1] >= e[0] * 60 + e[1]) return flag(sIn, errEl, '開始は目標の時刻より前にしてください。');
-      timers.push({ id: t.id, name, type: 'daily', start: hmStr(s), end: hmStr(e) });
+      if (!Array.isArray(t.dDays) || !t.dDays.length) return flag(card.querySelector('.wd'), errEl, '曜日を1つ以上選んでください。');
+      timers.push({ id: t.id, name, type: 'daily', start: hmStr(s), end: hmStr(e), days: normDays(t.dDays) });
     } else {
       const e = parseDT(t.xEnd), s = parseDT(t.xStart);
       const eIn = card.querySelector('[data-k="xEnd"]'), sIn = card.querySelector('[data-k="xStart"]');
